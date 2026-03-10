@@ -437,9 +437,18 @@ func tryParseImage(line string) gui.Node {
 		return nil
 	}
 	url := trimmed[closeBracket+2 : len(trimmed)-1]
-	if !strings.HasPrefix(url, "data:image/") &&
-		!strings.HasPrefix(url, "https://") &&
-		!strings.HasPrefix(url, "http://") {
+	lower := strings.ToLower(url)
+	switch {
+	case strings.HasPrefix(lower, "https://"),
+		strings.HasPrefix(lower, "http://"):
+		// OK
+	case strings.HasPrefix(lower, "data:image/png;"),
+		strings.HasPrefix(lower, "data:image/jpeg;"),
+		strings.HasPrefix(lower, "data:image/gif;"),
+		strings.HasPrefix(lower, "data:image/webp;"),
+		strings.HasPrefix(lower, "data:image/svg+xml;"):
+		// OK — only allow known safe image MIME types
+	default:
 		return nil
 	}
 	alt := trimmed[2:closeBracket]

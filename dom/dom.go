@@ -300,7 +300,11 @@ func extractEventData(eventType string, jsEvt js.Value) gui.Event {
 		if !cd.IsNull() && !cd.IsUndefined() {
 			items := cd.Get("items")
 			n := items.Length()
+			const maxPasteImages = 10
 			for i := 0; i < n; i++ {
+				if len(evt.ImageURLs) >= maxPasteImages {
+					break
+				}
 				item := items.Index(i)
 				if item.Get("kind").String() == "file" &&
 					strings.HasPrefix(item.Get("type").String(), "image/") {

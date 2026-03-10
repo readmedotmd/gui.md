@@ -1,6 +1,9 @@
 package gui
 
-import "reflect"
+import (
+	"fmt"
+	"reflect"
+)
 
 // --- Functional Components ---
 
@@ -75,10 +78,19 @@ func C[P any](exemplar Component[P], props P, children ...Node) *ComponentNode {
 		Children: children,
 		TypeKey:  typ.String(),
 		NewFunc: func() Renderable {
-			return reflect.New(typ).Interface().(Renderable)
+			v := reflect.New(typ).Interface()
+			r, ok := v.(Renderable)
+			if !ok {
+				panic(fmt.Sprintf("gui.C: type %T does not implement Renderable", v))
+			}
+			return r
 		},
 		InitFunc: func(r Renderable) {
-			r.(Component[P]).initBase(props, children)
+			c, ok := r.(Component[P])
+			if !ok {
+				panic(fmt.Sprintf("gui.C: type %T does not implement Component[%s]", r, typ.String()))
+			}
+			c.initBase(props, children)
 		},
 	}
 }
