@@ -8,6 +8,7 @@ package dom
 
 import (
 	gui "github.com/readmedotmd/gui.md"
+	stdhtml "html"
 	"io"
 	"strconv"
 	"strings"
@@ -577,7 +578,7 @@ func (r *Renderer) renderToString(node gui.Node) string {
 		buf.WriteString("</" + n.Tag + ">")
 		return buf.String()
 	case *gui.TextNode:
-		return n.Content
+		return stdhtml.EscapeString(n.Content)
 	case *gui.Fragment:
 		var buf strings.Builder
 		for _, child := range n.Children {

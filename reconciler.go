@@ -115,6 +115,9 @@ func (r *Reconciler) resolveAndFlatten(children []Node, onComponent func(Rendera
 	var result []Node
 	for _, child := range children {
 		resolved := r.resolve(child, onComponent, counters, seen)
+		if resolved == nil {
+			continue
+		}
 		if frag, ok := resolved.(*Fragment); ok {
 			result = append(result, frag.Children...)
 		} else {

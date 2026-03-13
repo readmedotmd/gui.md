@@ -117,6 +117,9 @@ func (r *Renderer) renderProps(props gui.Props, w io.Writer) {
 
 	for _, k := range keys {
 		v := props[k]
+		if !isSafePropKey(k) {
+			continue
+		}
 		// Skip function-valued props (event handlers registered with On/OnClick).
 		switch v.(type) {
 		case func():
@@ -133,6 +136,18 @@ func (r *Renderer) renderProps(props gui.Props, w io.Writer) {
 		}
 		fmt.Fprintf(w, ` %s="%s"`, k, stdhtml.EscapeString(fmt.Sprint(v)))
 	}
+}
+
+// isSafePropKey reports whether k is safe to use as an HTML attribute name.
+// It rejects keys containing whitespace, quotes, '=', '<', '>', or '/'.
+func isSafePropKey(k string) bool {
+	for _, r := range k {
+		switch r {
+		case ' ', '\t', '\n', '\r', '"', '\'', '=', '<', '>', '/', '`':
+			return false
+		}
+	}
+	return k != ""
 }
 
 // isVoidElement reports whether tag is an HTML void element.

@@ -76,7 +76,7 @@ func C[P any](exemplar Component[P], props P, children ...Node) *ComponentNode {
 	typ := reflect.TypeOf(exemplar).Elem()
 	return &ComponentNode{
 		Children: children,
-		TypeKey:  typ.String(),
+		TypeKey:  typ.PkgPath() + "." + typ.Name(),
 		NewFunc: func() Renderable {
 			v := reflect.New(typ).Interface()
 			r, ok := v.(Renderable)
@@ -192,8 +192,8 @@ func (c *BaseComponent[P, S]) UpdateState(fn func(S) S) {
 func (c *BaseComponent[P, S]) fireOnChange() {
 	if c.onChange != nil && !c.notifying {
 		c.notifying = true
+		defer func() { c.notifying = false }()
 		c.onChange()
-		c.notifying = false
 	}
 }
 
@@ -338,6 +338,9 @@ func resolveAndFlatten(children []Node, onComponent func(Renderable)) []Node {
 	var result []Node
 	for _, child := range children {
 		resolved := resolve(child, onComponent)
+		if resolved == nil {
+			continue
+		}
 		if frag, ok := resolved.(*Fragment); ok {
 			result = append(result, frag.Children...)
 		} else {

@@ -405,11 +405,17 @@ func walk(node gui.Node, path []int, fn func(gui.Node, []int)) {
 	switch n := node.(type) {
 	case *gui.Element:
 		for i, child := range n.Children {
-			walk(child, append(path, i), fn)
+			childPath := make([]int, len(path)+1)
+			copy(childPath, path)
+			childPath[len(path)] = i
+			walk(child, childPath, fn)
 		}
 	case *gui.Fragment:
 		for i, child := range n.Children {
-			walk(child, append(path, i), fn)
+			childPath := make([]int, len(path)+1)
+			copy(childPath, path)
+			childPath[len(path)] = i
+			walk(child, childPath, fn)
 		}
 	}
 }

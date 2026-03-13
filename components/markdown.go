@@ -13,6 +13,11 @@ import (
 // memory exhaustion from pathologically large documents.
 const MaxMarkdownSize = 1 << 20 // 1 MiB
 
+// maxInlineIterations limits the number of marker-scanning passes in
+// RenderInline. This prevents O(n²) behaviour on adversarial input where
+// unmatched markers cause repeated full-string scans.
+const maxInlineIterations = 10000
+
 // RenderMarkdown converts a markdown string into a gui Node tree using
 // standard HTML elements. Supported syntax:
 //
@@ -273,7 +278,13 @@ func RenderInline(text string) gui.Node {
 	var nodes []gui.Node
 	remaining := text
 
+	iterations := 0
 	for len(remaining) > 0 {
+		iterations++
+		if iterations > maxInlineIterations {
+			nodes = append(nodes, gui.Text(remaining))
+			break
+		}
 		earliest := -1
 		var chosen marker
 
