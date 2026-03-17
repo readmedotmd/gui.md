@@ -35,6 +35,10 @@ type RouteConfig struct {
 	// Guards are checked in order before this route is entered.
 	// If any guard returns false, navigation is cancelled.
 	Guards []RouteGuard
+
+	// segments caches the parsed pattern. Populated lazily on first match.
+	segments []routeSegment
+	parsed   bool
 }
 
 // Params holds named route parameters extracted from the URL.
@@ -91,6 +95,15 @@ func parsePattern(pattern string) []routeSegment {
 	return segs
 }
 
+// getSegments returns the parsed pattern segments, caching them on first access.
+func (r *RouteConfig) getSegments() []routeSegment {
+	if !r.parsed {
+		r.segments = parsePattern(r.Path)
+		r.parsed = true
+	}
+	return r.segments
+}
+
 // MatchRoute finds the first matching route in the configuration tree for the
 // given path. It returns nil if no route matches.
 func MatchRoute(routes []RouteConfig, path string) *RouteMatch {
@@ -108,7 +121,7 @@ func matchRoutes(routes []RouteConfig, path string, layouts []func(Node) Node, g
 }
 
 func matchSingle(r *RouteConfig, path string, layouts []func(Node) Node, guards []RouteGuard) *RouteMatch {
-	segs := parsePattern(r.Path)
+	segs := r.getSegments()
 
 	// Collect guards for this level.
 	allGuards := guards
@@ -173,9 +186,7 @@ func matchSegments(segs []routeSegment, pathSegs []string, params Params) (consu
 		if seg.wildcard != "" {
 			// Wildcard consumes everything remaining.
 			rest := strings.Join(pathSegs[pi:], "/")
-			if seg.wildcard != "" {
-				params[seg.wildcard] = rest
-			}
+			params[seg.wildcard] = rest
 			return len(pathSegs), true
 		}
 		if pi >= len(pathSegs) {

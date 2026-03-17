@@ -79,7 +79,8 @@ func (r *Renderer) renderNode(node gui.Node, w io.Writer, depth int) error {
 // Void elements (e.g. <br>, <img>) that have no children are written as
 // self-closing tags and their children slice is ignored.
 func (r *Renderer) renderElement(el *gui.Element, w io.Writer, depth int) error {
-	fmt.Fprintf(w, "<%s", el.Tag)
+	io.WriteString(w, "<")  //nolint:errcheck
+	io.WriteString(w, el.Tag) //nolint:errcheck
 	r.renderProps(el.Props, w)
 
 	if isVoidElement(el.Tag) && len(el.Children) == 0 {
@@ -93,7 +94,9 @@ func (r *Renderer) renderElement(el *gui.Element, w io.Writer, depth int) error 
 			return err
 		}
 	}
-	fmt.Fprintf(w, "</%s>", el.Tag)
+	io.WriteString(w, "</")  //nolint:errcheck
+	io.WriteString(w, el.Tag) //nolint:errcheck
+	io.WriteString(w, ">")    //nolint:errcheck
 	return nil
 }
 
@@ -129,12 +132,17 @@ func (r *Renderer) renderProps(props gui.Props, w io.Writer) {
 		}
 		if b, ok := v.(bool); ok {
 			if b {
-				fmt.Fprintf(w, " %s", k)
+				io.WriteString(w, " ")  //nolint:errcheck
+				io.WriteString(w, k)    //nolint:errcheck
 			}
 			// false boolean props are omitted entirely.
 			continue
 		}
-		fmt.Fprintf(w, ` %s="%s"`, k, stdhtml.EscapeString(fmt.Sprint(v)))
+		io.WriteString(w, ` `)                                       //nolint:errcheck
+		io.WriteString(w, k)                                         //nolint:errcheck
+		io.WriteString(w, `="`)                                      //nolint:errcheck
+		io.WriteString(w, stdhtml.EscapeString(fmt.Sprint(v)))       //nolint:errcheck
+		io.WriteString(w, `"`)                                       //nolint:errcheck
 	}
 }
 

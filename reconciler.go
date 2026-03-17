@@ -10,13 +10,17 @@ import "strconv"
 // Use [NewReconciler] to create one. dom.App creates a reconciler
 // automatically; standalone callers can use one for stateful HTML rendering.
 type Reconciler struct {
-	cache map[string]Renderable
+	cache    map[string]Renderable
+	counters map[string]int    // reused across cycles
+	seen     map[string]struct{} // reused across cycles
 }
 
 // NewReconciler creates a Reconciler with an empty instance cache.
 func NewReconciler() *Reconciler {
 	return &Reconciler{
-		cache: make(map[string]Renderable),
+		cache:    make(map[string]Renderable),
+		counters: make(map[string]int),
+		seen:     make(map[string]struct{}),
 	}
 }
 
@@ -25,13 +29,19 @@ func NewReconciler() *Reconciler {
 // component encountered (both C-managed and Mount-managed), allowing callers
 // to wire SetOnChange and track removals. Passing nil is valid.
 func (r *Reconciler) Resolve(node Node, onComponent func(Renderable)) Node {
-	counters := make(map[string]int)
-	seen := make(map[string]struct{})
-	result := r.resolve(node, onComponent, counters, seen)
+	// Clear reusable maps instead of reallocating.
+	for k := range r.counters {
+		delete(r.counters, k)
+	}
+	for k := range r.seen {
+		delete(r.seen, k)
+	}
+
+	result := r.resolve(node, onComponent)
 
 	// Remove cache entries not seen this cycle.
 	for key := range r.cache {
-		if _, ok := seen[key]; !ok {
+		if _, ok := r.seen[key]; !ok {
 			delete(r.cache, key)
 		}
 	}
@@ -39,21 +49,21 @@ func (r *Reconciler) Resolve(node Node, onComponent func(Renderable)) Node {
 	return result
 }
 
-func (r *Reconciler) resolve(node Node, onComponent func(Renderable), counters map[string]int, seen map[string]struct{}) Node {
+func (r *Reconciler) resolve(node Node, onComponent func(Renderable)) Node {
 	if node == nil {
 		return nil
 	}
 	switch n := node.(type) {
 	case *ComponentNode:
 		if n.Func != nil {
-			return r.resolve(n.Func(n.Children), onComponent, counters, seen)
+			return r.resolve(n.Func(n.Children), onComponent)
 		}
 		if n.NewFunc != nil {
 			// Managed component: look up or create instance.
-			idx := counters[n.TypeKey]
-			counters[n.TypeKey] = idx + 1
+			idx := r.counters[n.TypeKey]
+			r.counters[n.TypeKey] = idx + 1
 			cacheKey := n.TypeKey + ":" + strconv.Itoa(idx)
-			seen[cacheKey] = struct{}{}
+			r.seen[cacheKey] = struct{}{}
 
 			inst, exists := r.cache[cacheKey]
 			if !exists {
@@ -62,16 +72,16 @@ func (r *Reconciler) resolve(node Node, onComponent func(Renderable), counters m
 			}
 			n.InitFunc(inst)
 
-			return r.resolveStateful(inst, onComponent, counters, seen)
+			return r.resolveStateful(inst, onComponent)
 		}
 		if n.Stateful != nil {
-			return r.resolveStateful(n.Stateful, onComponent, counters, seen)
+			return r.resolveStateful(n.Stateful, onComponent)
 		}
 		return nil
 	case *Element:
-		return &Element{Tag: n.Tag, Props: n.Props, Children: r.resolveAndFlatten(n.Children, onComponent, counters, seen)}
+		return &Element{Tag: n.Tag, Props: n.Props, Children: r.resolveAndFlatten(n.Children, onComponent)}
 	case *Fragment:
-		return &Fragment{Children: r.resolveAndFlatten(n.Children, onComponent, counters, seen)}
+		return &Fragment{Children: r.resolveAndFlatten(n.Children, onComponent)}
 	case *TextNode:
 		return n
 	default:
@@ -79,13 +89,13 @@ func (r *Reconciler) resolve(node Node, onComponent func(Renderable), counters m
 	}
 }
 
-func (r *Reconciler) resolveStateful(inst Renderable, onComponent func(Renderable), counters map[string]int, seen map[string]struct{}) Node {
+func (r *Reconciler) resolveStateful(inst Renderable, onComponent func(Renderable)) Node {
 	mt, tracked := inst.(mountTracker)
 	if tracked && mt.isMounted() {
 		if wu, ok := inst.(willUpdater); ok {
 			wu.WillUpdate()
 		}
-		result := r.resolve(inst.Render(), onComponent, counters, seen)
+		result := r.resolve(inst.Render(), onComponent)
 		if du, ok := inst.(didUpdater); ok {
 			du.DidUpdate()
 		}
@@ -98,7 +108,7 @@ func (r *Reconciler) resolveStateful(inst Renderable, onComponent func(Renderabl
 	if wm, ok := inst.(willMounter); ok {
 		wm.WillMount()
 	}
-	result := r.resolve(inst.Render(), onComponent, counters, seen)
+	result := r.resolve(inst.Render(), onComponent)
 	if dm, ok := inst.(didMounter); ok {
 		dm.DidMount()
 	}
@@ -111,10 +121,10 @@ func (r *Reconciler) resolveStateful(inst Renderable, onComponent func(Renderabl
 	return result
 }
 
-func (r *Reconciler) resolveAndFlatten(children []Node, onComponent func(Renderable), counters map[string]int, seen map[string]struct{}) []Node {
+func (r *Reconciler) resolveAndFlatten(children []Node, onComponent func(Renderable)) []Node {
 	var result []Node
 	for _, child := range children {
-		resolved := r.resolve(child, onComponent, counters, seen)
+		resolved := r.resolve(child, onComponent)
 		if resolved == nil {
 			continue
 		}

@@ -34,7 +34,10 @@ type Patch struct {
 // Both trees should already be resolved (no ComponentNodes).
 func Diff(old, new Node) []Patch {
 	var patches []Patch
-	diffNodes(old, new, nil, &patches)
+	// Use a stack-based path buffer to avoid allocations during traversal.
+	// Only snapshot (copy) the path when creating an actual patch.
+	pathBuf := make([]int, 0, 16)
+	diffNodes(old, new, pathBuf, &patches)
 	return patches
 }
 
@@ -69,7 +72,7 @@ func diffNodes(old, new Node, path []int, patches *[]Patch) {
 			*patches = append(*patches, Patch{Op: OpReplace, Path: copyPath(path), Old: old, New: new})
 			return
 		}
-		if changed := diffProps(o.Props, n.Props); len(changed) > 0 {
+		if changed := diffProps(o.Props, n.Props); changed != nil {
 			*patches = append(*patches, Patch{
 				Op: OpUpdateProps, Path: copyPath(path), Props: changed,
 			})
@@ -95,7 +98,10 @@ func diffChildren(oldKids, newKids []Node, parentPath []int, patches *[]Patch) {
 		minLen = len(newKids)
 	}
 	for i := 0; i < minLen; i++ {
-		childPath := append(copyPath(parentPath), i)
+		// Extend the path buffer in-place; diffNodes will extend further or
+		// snapshot via copyPath only when emitting a patch. Slice back after
+		// the recursive call so the buffer is reusable.
+		childPath := append(parentPath, i) //nolint:gocritic // intentional reuse
 		diffNodes(oldKids[i], newKids[i], childPath, patches)
 	}
 	// Extra new children → InsertChild
@@ -114,7 +120,32 @@ func diffChildren(oldKids, newKids []Node, parentPath []int, patches *[]Patch) {
 	}
 }
 
+// diffProps returns changed props between old and new, or nil if identical.
+// Returning nil (not empty map) when there are no changes avoids a map
+// allocation on the hot path where most elements are unchanged.
 func diffProps(old, new Props) Props {
+	// Fast path: check if anything changed before allocating.
+	anyChange := false
+	for k, nv := range new {
+		ov, exists := old[k]
+		if !exists || !propsEqual(ov, nv) {
+			anyChange = true
+			break
+		}
+	}
+	if !anyChange {
+		// Check for removals.
+		for k := range old {
+			if _, exists := new[k]; !exists {
+				anyChange = true
+				break
+			}
+		}
+	}
+	if !anyChange {
+		return nil
+	}
+
 	changed := Props{}
 	for k, nv := range new {
 		ov, exists := old[k]
@@ -147,6 +178,21 @@ func propsEqual(a, b any) bool {
 	// Functions are never considered equal (always re-apply).
 	if isHandlerFunc(a) || isHandlerFunc(b) {
 		return false
+	}
+	// Fast path for common types — avoids reflect.DeepEqual overhead.
+	switch av := a.(type) {
+	case string:
+		bv, ok := b.(string)
+		return ok && av == bv
+	case bool:
+		bv, ok := b.(bool)
+		return ok && av == bv
+	case int:
+		bv, ok := b.(int)
+		return ok && av == bv
+	case float64:
+		bv, ok := b.(float64)
+		return ok && av == bv
 	}
 	return reflect.DeepEqual(a, b)
 }
