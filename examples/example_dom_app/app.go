@@ -6,7 +6,7 @@
 //   - gui.BaseComponent[P, S]    — stateful component for the contact form (pink badge)
 //   - gui.FuncComponent[T]       — NavBar with typed props (green badge)
 //   - gui/dom.App                — auto-wires SetOnChange and DidUnmount for stateful components
-//   - gui/dom.Router             — hash-based SPA navigation
+//   - gui/dom.Router             — declarative routing with params, layouts, and guards
 //   - Event handling             — onclick, oninput, onchange
 //   - Full CSS styling           — embedded via gui.StyleEl
 //
@@ -88,6 +88,7 @@ body {
 .badge-store { background: #dbeafe; color: #1e40af; }
 .badge-component { background: #fce7f3; color: #9d174d; }
 .badge-functional { background: #d1fae5; color: #065f46; }
+.badge-router { background: #fef3c7; color: #92400e; }
 
 /* Feature list */
 .features { list-style: none; padding: 0; }
@@ -129,6 +130,10 @@ body {
 /* About grid */
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 @media (max-width: 600px) { .grid { grid-template-columns: 1fr; } }
+
+/* User profile */
+.profile-header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+.avatar { width: 64px; height: 64px; border-radius: 50%; background: #e94560; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.5rem; font-weight: 700; }
 `
 
 // ---------------------------------------------------------------------------
@@ -145,6 +150,10 @@ func badgeComponent() gui.Node {
 
 func badgeFunctional() gui.Node {
 	return gui.Span(gui.Class("badge badge-functional"))(gui.Text("FuncComponent[T]"))
+}
+
+func badgeRouter() gui.Node {
+	return gui.Span(gui.Class("badge badge-router"))(gui.Text("Router"))
 }
 
 func displayOr(s, fallback string) string {
@@ -194,6 +203,7 @@ func NavBar(props NavBarProps, _ []gui.Node) gui.Node {
 			link("/", "Home"),
 			link("/about", "About"),
 			link("/contact", "Contact"),
+			link("/user/42", "User 42"),
 		),
 	)
 }
@@ -311,7 +321,7 @@ func (c *ContactForm) Render() gui.Node {
 // Pages
 // ---------------------------------------------------------------------------
 
-func homePage() gui.Node {
+func homePage(_ gui.Params) gui.Node {
 	return gui.Div()(
 		gui.Div(gui.Class("card"))(
 			gui.H2()(gui.Text("Welcome to NanoGUI")),
@@ -328,7 +338,7 @@ func homePage() gui.Node {
 				gui.Li()(gui.Text("Stateful components with BaseComponent[P, S]")),
 				gui.Li()(gui.Text("Generic store with subscriptions")),
 				gui.Li()(gui.Text("Virtual DOM diffing and patching")),
-				gui.Li()(gui.Text("Hash-based router for SPA navigation")),
+				gui.Li()(gui.Text("Declarative router with params, layouts, and guards")),
 				gui.Li()(gui.Text("Event handling: click, input, change, keyboard")),
 				gui.Li()(gui.Text("Three backends: HTML, DOM (WASM), Terminal")),
 			),
@@ -338,8 +348,8 @@ func homePage() gui.Node {
 			gui.Ul(gui.Class("features"))(
 				gui.Li()(
 					gui.Strong()(gui.Text("Navigation")),
-					badgeStore(),
-					gui.Text(" — route stored in gui.Store[AppState], hash router syncs it"),
+					badgeRouter(),
+					gui.Text(" — declarative routes with params, nested layouts, and guards"),
 				),
 				gui.Li()(
 					gui.Strong()(gui.Text("NavBar")),
@@ -353,12 +363,17 @@ func homePage() gui.Node {
 						" — stateful component with typed local state, SetState triggers re-render",
 					),
 				),
+				gui.Li()(
+					gui.Strong()(gui.Text("User Profile")),
+					badgeRouter(),
+					gui.Text(" — dynamic route /user/:id with extracted params"),
+				),
 			),
 		),
 	)
 }
 
-func aboutPage() gui.Node {
+func aboutPage(_ gui.Params) gui.Node {
 	return gui.Div()(
 		gui.Div(gui.Class("card"))(
 			gui.H2()(gui.Text("About This Demo")),
@@ -394,10 +409,10 @@ func aboutPage() gui.Node {
 				),
 			),
 			gui.Div(gui.Class("card"))(
-				gui.H2()(gui.Text("Rendering")),
+				gui.H2()(gui.Text("Declarative Router"), badgeRouter()),
 				gui.P()(
 					gui.Text(
-						"The same node tree API renders to static HTML, live DOM (WASM), or styled terminal output.",
+						"Routes are declared with dom.Route/dom.RouteWithLayout. Supports :param patterns, nested layouts, wildcard paths, and navigation guards.",
 					),
 				),
 			),
@@ -405,40 +420,78 @@ func aboutPage() gui.Node {
 	)
 }
 
-// ---------------------------------------------------------------------------
-// Layout
-// ---------------------------------------------------------------------------
+func contactPage(_ gui.Params) gui.Node {
+	return gui.C(new(ContactForm), nil)
+}
 
-func buildApp(state AppState, navigate func(string)) gui.Node {
-	var page gui.Node
-	switch state.Route {
-	case "/about":
-		page = aboutPage()
-	case "/contact":
-		page = gui.C(new(ContactForm), nil)
-	default:
-		page = homePage()
-	}
+func userPage(params gui.Params) gui.Node {
+	id := params["id"]
+	initial := string([]rune(id)[0:1])
 
-	return gui.Div(gui.Class("app"))(
-		gui.StyleEl()(gui.Text(appCSS)),
-		gui.Comp(NavBar, NavBarProps{
-			Route: state.Route,
-			OnNavigate: func(e gui.Event) {
-				navigate(e.Value)
-			},
-		}),
-		gui.Div(gui.Style("text-align:right; margin-bottom:8px"))(
-			gui.Span(gui.Style("font-size:0.8rem; color:#888"))(
-				gui.Textf("Current route: %s", state.Route),
+	return gui.Div()(
+		gui.Div(gui.Class("card"))(
+			gui.H2()(
+				gui.Text("User Profile"),
+				badgeRouter(),
 			),
-			badgeStore(),
+			gui.P(gui.Style("color:#888; font-size:0.85rem; margin-bottom:16px"))(
+				gui.Textf("Dynamic route /user/:id — param extracted by the router. Current id = %q", id),
+			),
+			gui.Div(gui.Class("profile-header"))(
+				gui.Div(gui.Class("avatar"))(gui.Text(initial)),
+				gui.Div()(
+					gui.H3()(gui.Textf("User #%s", id)),
+					gui.P(gui.Style("color:#888"))(gui.Text("Member since 2024")),
+				),
+			),
 		),
-		page,
-		gui.Footer(gui.Class("footer"))(
-			gui.Text("Built with NanoGUI — Go + WebAssembly"),
+		gui.Div(gui.Class("card"))(
+			gui.H2()(gui.Text("Activity")),
+			gui.Ul(gui.Class("features"))(
+				gui.Li()(gui.Textf("User %s created a new project", id)),
+				gui.Li()(gui.Textf("User %s pushed 3 commits", id)),
+				gui.Li()(gui.Textf("User %s commented on issue #12", id)),
+			),
 		),
 	)
+}
+
+func notFoundPage(_ gui.Params) gui.Node {
+	return gui.Div(gui.Class("card"))(
+		gui.H2()(gui.Text("404 — Page Not Found")),
+		gui.P()(gui.Text("The route you requested does not exist.")),
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Layout — wraps all pages with nav, route indicator, and footer
+// ---------------------------------------------------------------------------
+
+// appLayout wraps every page with the navbar, route indicator, and footer.
+// This is the root layout passed to RouteWithLayout.
+func appLayout(navigate func(string), routeStore *gui.Store[AppState]) func(outlet gui.Node) gui.Node {
+	return func(outlet gui.Node) gui.Node {
+		state := routeStore.Get()
+		return gui.Div(gui.Class("app"))(
+			gui.StyleEl()(gui.Text(appCSS)),
+			gui.Comp(NavBar, NavBarProps{
+				Route: state.Route,
+				OnNavigate: func(e gui.Event) {
+					navigate(e.Value)
+				},
+			}),
+			gui.Div(gui.Style("text-align:right; margin-bottom:8px"))(
+				gui.Span(gui.Style("font-size:0.8rem; color:#888"))(
+					gui.Textf("Current route: %s", state.Route),
+				),
+				badgeStore(),
+			),
+			outlet,
+			gui.Footer(gui.Class("footer"))(
+				gui.Text("Built with NanoGUI — Go + WebAssembly"),
+			),
+		)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -449,7 +502,33 @@ func main() {
 	appStore := gui.NewStore(AppState{Route: "/"})
 
 	container := js.Global().Get("document").Call("getElementById", "app")
-	router := dom.NewRouter()
+
+	// Build the route table. The root layout wraps every page.
+	// We pass appStore so the layout can read the current route for
+	// the navbar's active state. We'll set up the navigate function
+	// after creating the router.
+	var router *dom.Router
+
+	router = dom.NewRouter(
+		dom.WithRoutes(
+			// Root layout wraps all child routes.
+			dom.RouteWithLayout("/", appLayout(
+				func(path string) { router.Navigate(path) },
+				appStore,
+			),
+				dom.Route("", homePage),
+				dom.Route("/about", aboutPage),
+				dom.Route("/contact", contactPage),
+				dom.Route("/user/:id", userPage),
+			),
+		),
+		// Example global guard: log navigations (always allows).
+		dom.BeforeEach(func(from, to string) bool {
+			js.Global().Get("console").Call("log",
+				"[router] navigating from", from, "to", to)
+			return true
+		}),
+	)
 	defer router.Release()
 
 	// Sync router → store.
@@ -459,7 +538,20 @@ func main() {
 	})
 
 	app := dom.NewApp(container, func() gui.Node {
-		return buildApp(appStore.Get(), router.Navigate)
+		page := router.Render()
+		if page == nil {
+			page = gui.RenderMatch(&gui.RouteMatch{
+				Params:  gui.Params{},
+				Handler: notFoundPage,
+				Layouts: []func(gui.Node) gui.Node{
+					appLayout(
+						func(path string) { router.Navigate(path) },
+						appStore,
+					),
+				},
+			})
+		}
+		return page
 	})
 	defer app.Release()
 

@@ -233,58 +233,201 @@ store.Subscribe(func(_, _ MyState) {
 
 Call `renderer.Release()` when done to free all JS callback functions and prevent memory leaks.
 
-## Hash Router (`gui/dom`)
+## Router (`gui/dom`)
 
-The `dom` package includes a hash-based router for single-page WASM applications. It listens for `hashchange` events and exposes the current route through a `gui.Store[string]`.
+The `dom` package includes a full-featured router for single-page WASM applications. It supports:
 
-### Basic Usage
+- **Hash mode** (default) — uses `location.hash` and `hashchange` events (`/#/about`)
+- **History API mode** — uses `pushState`/`popstate` for clean URLs (`/about`)
+- **Route pattern matching** — named parameters (`:id`) and wildcards (`*path`)
+- **Nested routes with layouts** — shared layout wrappers for route groups
+- **Navigation guards** — global and per-route guards that can cancel navigation
+
+### Basic Usage (Manual Matching)
+
+The simplest usage works just like before — no route table, you match manually:
 
 ```go
 router := dom.NewRouter()
 defer router.Release()
 
-fmt.Println(router.Route()) // "/" initially
-
 router.Subscribe(func(route, prevRoute string) {
     fmt.Println("navigated from", prevRoute, "to", route)
 })
 
-router.Navigate("/about") // sets location.hash, triggers hashchange
+router.Navigate("/about")
+```
+
+### Declarative Routes
+
+Define routes with pattern matching and the router handles matching automatically:
+
+```go
+router := dom.NewRouter(
+    dom.WithRoutes(
+        dom.Route("/", homePage),
+        dom.Route("/about", aboutPage),
+        dom.Route("/user/:id", userPage),
+        dom.Route("/files/*path", filesPage),
+    ),
+)
+defer router.Release()
+
+// In your render function:
+page := router.Render() // returns matched page Node, or nil
+```
+
+Route handlers receive extracted parameters:
+
+```go
+func userPage(params gui.Params) gui.Node {
+    id := params["id"] // "42" for /user/42
+    return gui.Div()(gui.Textf("User %s", id))
+}
+```
+
+### Nested Routes & Layouts
+
+Use `RouteWithLayout` to wrap child routes in a shared layout. The layout receives the matched child as an "outlet":
+
+```go
+router := dom.NewRouter(
+    dom.WithRoutes(
+        dom.RouteWithLayout("/", appLayout,
+            dom.Route("", homePage),          // matches /
+            dom.Route("/about", aboutPage),   // matches /about
+            dom.Route("/user/:id", userPage), // matches /user/42
+        ),
+    ),
+)
+
+func appLayout(outlet gui.Node) gui.Node {
+    return gui.Div(gui.Class("app"))(
+        NavBar(),
+        outlet,    // matched child page renders here
+        Footer(),
+    )
+}
+```
+
+Layouts can be nested. Each level wraps its children:
+
+```go
+dom.RouteWithLayout("/app", appLayout,
+    dom.RouteWithLayout("/dashboard", dashLayout,
+        dom.Route("", overview),
+        dom.Route("/settings", settings),
+    ),
+)
+// /app/dashboard/settings → appLayout(dashLayout(settings()))
+```
+
+### Navigation Guards
+
+Guards run before navigation is committed. Return `false` to cancel.
+
+**Global guards** (checked on every navigation):
+
+```go
+router := dom.NewRouter(
+    dom.BeforeEach(func(from, to string) bool {
+        if to == "/admin" && !isAuthenticated() {
+            return false // cancel navigation
+        }
+        return true
+    }),
+    dom.WithRoutes(...),
+)
+```
+
+**Per-route guards** (checked only for that route and its children):
+
+```go
+gui.RouteConfig{
+    Path:    "/admin",
+    Handler: adminPage,
+    Guards:  []gui.RouteGuard{requireAuth},
+}
+```
+
+Guards are inherited — a parent route's guards also protect its children.
+
+### History API Mode
+
+Use `WithHistoryMode()` for clean URLs without hash fragments. Requires server-side configuration to serve `index.html` for all routes.
+
+```go
+router := dom.NewRouter(
+    dom.WithHistoryMode(),
+    dom.WithRoutes(...),
+)
+// URLs: /about instead of /#/about
 ```
 
 ### API
 
 | Method | Description |
 |--------|-------------|
-| `NewRouter() *Router` | Creates a router, reads the initial hash, listens for `hashchange` |
-| `Route() string` | Returns the current path (e.g. `"/about"`) |
-| `Navigate(path string)` | Sets `location.hash` — triggers `hashchange` and notifies subscribers |
-| `Subscribe(fn func(route, prevRoute string)) func()` | Registers a route-change callback; returns unsubscribe |
-| `Release()` | Removes the `hashchange` listener and frees the JS callback |
+| `NewRouter(opts ...RouterOption) *Router` | Creates a router with optional configuration |
+| `Route() string` | Returns the current path (e.g. `"/user/42"`) |
+| `Navigate(path string)` | Navigates to path (guards are checked first) |
+| `Params() gui.Params` | Returns extracted params for the current route |
+| `Match() *gui.RouteMatch` | Returns the full match (params, handler, layouts, guards) |
+| `Render() gui.Node` | Matches current path, runs handler, applies layouts — returns the page Node |
+| `Subscribe(fn) func()` | Registers a route-change callback; returns unsubscribe |
+| `Release()` | Removes event listener and frees JS callback |
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `WithRoutes(routes ...gui.RouteConfig)` | Sets the declarative route table |
+| `WithHistoryMode()` | Uses History API instead of hash fragments |
+| `BeforeEach(guard)` | Registers a global navigation guard |
+
+**Route builders:**
+
+| Function | Description |
+|----------|-------------|
+| `dom.Route(path, handler, children...)` | Creates a route with a handler |
+| `dom.RouteWithLayout(path, layout, children...)` | Creates a layout-only route |
+| `dom.RouteWithGuards(path, handler, guards, children...)` | Creates a route with guards |
+
+### Route Matching (Pure Go)
+
+The route matching engine lives in the `gui` package (`route.go`) and is usable outside of WASM:
+
+```go
+routes := []gui.RouteConfig{
+    {Path: "/user/:id", Handler: userPage},
+    {Path: "/files/*path", Handler: filesPage},
+}
+
+m := gui.MatchRoute(routes, "/user/42")
+// m.Params["id"] == "42"
+
+node := gui.RenderMatch(m) // runs handler + layouts
+
+ok := gui.CheckGuards(m, "/", "/user/42") // runs guard chain
+```
 
 ### Wiring with a Store
 
-A typical pattern is to sync the router into your app store so a single `Subscribe` drives re-renders:
+Sync the router into your app store so a single `Subscribe` drives re-renders:
 
 ```go
 store := gui.NewStore(AppState{Route: router.Route()})
 
 router.Subscribe(func(route, _ string) {
-    store.Update(func(s AppState) AppState {
-        s.Route = route
-        return s
-    })
+    store.Set(AppState{Route: route})
 })
 
-store.Subscribe(func(_, _ AppState) {
-    renderer.Update(func() gui.Node {
-        return buildApp(store.Get())
-    })
-})
+store.Subscribe(func(_, _ AppState) { app.Render() })
 ```
 
-See `example_dom_app/` for a complete multi-page example.
+See `example_dom_app/` for a complete example using declarative routes, params, layouts, and guards.
 
 ## Limitations
 
 - The static WASM examples (`html_hello`, `html_page`) use `document.write()` and render once. For interactive apps, use the DOM renderer (`gui/dom`) instead.
+- History API mode requires server-side configuration to serve `index.html` for all routes (standard SPA setup).
